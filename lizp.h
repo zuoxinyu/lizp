@@ -126,12 +126,17 @@ struct val_t {
 	val_t * body;
 	
 	env_t * innerEnv;
+
+	/* For application */
+	val_t * func;
+	val_t * formal;
 };
 
 val_t * valNew(int type);
 void    valDel(val_t * val);
 val_t * valRead(mpc_ast_t * ast);
-val_t * eval(val_t * lambda, val_t * param, env_t * env);
+val_t * eval(val_t * val, env_t * env);
+val_t * apply(val_t * lambda, val_t * param, env_t * env);
 
 //val_t * eval(val_t * val);
 
