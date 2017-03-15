@@ -107,17 +107,17 @@ Lizp is a functional language which based on lambda calculus.
 
 - Builtins:
 
-| Function(s)| Symantic                     |
+| Element(s) | Symantic                     |
 | ---------- | ---------------------------- |
-|<number>    | nature numbers               | 
-|<string>    | native strings               |
-|[+,-,\*,/]  |  algebra operators           |
-|[&,|,~]     | bitwise operators            |
-|[&&,||,!]   | logic operators              |
+|number      | nature numbers               | 
+|string      | native strings               |
+|[+,-,\*,/]  | algebra operators            |
+|[&,\|,~]    | bitwise operators            |
+|[&&,\|\|,!] | logic operators              |
 |[>,<,==,!=] | compare operators            |
-|[cond]      | symantic for goto            |
-|[self]      | symantic for recursion       |
-|[cons]      | symantic for list constuctor |
+|cond        | symantic for goto            |
+|self        | symantic for recursion       |
+|cons        | symantic for list constuctor |
 
 
 
