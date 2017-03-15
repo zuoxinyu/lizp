@@ -106,6 +106,7 @@ Lizp is a functional language which based on lambda calculus.
 > Actually, We can define everything as lambda(s). 
 
 - Builtins:
+
 | Function(s)| Symantic                     |
 | ---------- | ---------------------------- |
 |<number>    | nature numbers               | 
