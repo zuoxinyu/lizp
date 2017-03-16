@@ -156,9 +156,10 @@ struct env_t {
 };
 
 env_t * envNew(void);
+void    envDel(env_t * env);
 val_t * envFind(const char * sym, env_t * env);
 int envBind(const char * sym, val_t * val, env_t * env);
-void envAdd(const char * sym, val_t * val, env_t * env);
-void envDel(const char * sym, env_t * env);
+void envInsert(const char * sym, val_t * val, env_t * env);
+void envRemove(const char * sym, env_t * env);
 
 #endif

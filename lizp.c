@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static env_t * globalEnv;
-static val_t * unboundVal;
+static env_t * GlobalEnv;
+static val_t * Unbound;
 
 #define LOG(fmt,...) do { lizplog(fmt,##__VA_ARGS__); }while(0)
 
@@ -24,10 +24,33 @@ char * strdump(const char * s) {
 	return newStr;
 }
 
-val_t * valNew(int type) {
+val_t * valNew(int t) {
     val_t * v = calloc(1,sizeof(val_t));
-	v->type = type;
+	v->type = t;
     return v;
+}
+
+void valDel(val_t * v) {
+	switch (v->type) {
+	case TYPE_ERR:
+		free(v->err); break;
+	case TYPE_SYM:
+		free(v->sym); break;
+	case TYPE_STR:
+		free(v->str); break;
+	case TYPE_LAMBDA:
+		free(v->param);
+		envDel(v->innerEnv);
+		valDel(v->body); break;
+	case TYPE_APPLY:
+		valDel(v->func);
+		valDel(v->formal); break;
+	case TYPE_NUM:
+	default:
+		break;
+	}
+
+	free(v);
 }
 
 val_t * valErr(const char * fmt, ...) {
@@ -64,14 +87,21 @@ val_t * valSym(const char * s) {
 	return v;
 }
 
-val_t * valLambda(const char * param, val_t * body) {
+val_t * valLambda(const char * s, val_t * b) {
 	val_t * v = valNew(TYPE_LAMBDA);
-	v->param = strdump(param);
-	v->body = body;
+	v->param = strdump(s);
+	v->body = b;
 	v->innerEnv = envNew();
-	/* If in a lambda inner env a parameter points to Unbound,
-	   it means that the parameter has not been bound */
-	envAdd(param, unboundVal, v->innerEnv); 
+	/* If in a lambda inner env a peter points to Unbound,
+	   it means that the peter has not been bound */
+	envInsert(s, Unbound, v->innerEnv); 
+	return v;
+}
+
+val_t * valApply(val_t * f, val_t * p) {
+	val_t * v = valNew(TYPE_APPLY);
+	v->func = f;
+	v->formal = p;
 	return v;
 }
 
@@ -83,34 +113,7 @@ val_t * valReadLambda(mpc_ast_t * ast) {
 val_t * valReadApply(mpc_ast_t * ast) {
 	/* (<expr> <expr>) */
 	//printf("Application: childNumber <%d>", ast->children_num);
-	return eval(valRead(ast->children[1]),valRead(ast->children[2]), globalEnv);
-}
-
-val_t * eval(val_t * lambda, val_t * param, env_t * env) {
-	if (param == NULL) {
-		return envFind(lambda->sym, env);
-	}
-	if (lambda->type == TYPE_SYM) {
-		return eval(envFind(lambda->sym, env), param, env);
-	}
-	if (param->type == TYPE_SYM) {
-		return eval(lambda, envFind(param->sym, env), env);
-	}
-	if (lambda->type == TYPE_LAMBDA) {
-		if (envBind(lambda->body->sym, param, lambda->innerEnv))
-			return eval(lambda->body, NULL, lambda->innerEnv);
-	}
-	return valErr("Eval failed!");
-}
-
-int envBind(const char * s, val_t * v, env_t * e) {
-	for (size_t i = 0; i < e->count; ++i) {
-		if (!strcmp(e->syms[i], s) && e->vars[i] == unboundVal) {
-			e->vars[i] = v;
-			return 1;
-		}
-	}
-	return 0;
+	return valApply(valRead(ast->children[1]), valRead(ast->children[2]));
 }
 
 val_t * valRead(mpc_ast_t * ast) {
@@ -142,6 +145,9 @@ void valPrint(val_t * v) {
 					   valPrint(v->body);
 					   break;
 		case TYPE_APPLY:
+					   printf("<APL> ");
+					   valPrint(v->func);
+					   valPrint(v->formal);
 					   break;
 		default:
 					   printf("ERR!\n");
@@ -153,26 +159,48 @@ env_t * envNew(void) {
 	return calloc(1, sizeof(env_t));
 }
 
-void envAdd(const char * s, val_t * v, env_t * e) {
+void envInsert(const char * s, val_t * v, env_t * e) {
 	e->syms = realloc(e->syms, sizeof(char *)*(e->count+1));
 	e->vars = realloc(e->vars, sizeof(val_t*)*(e->count+1));
-	e->syms[e->count] = s;
+	e->syms[e->count] = s; //Not strdump
 	e->vars[e->count] = v;
 	e->count++;
 }
 
-void envDel(const char * s, env_t * e) {
-	for (size_t i = 0; i < e->count; i++) {
-		if (!strcmp(e->syms[i], s))
-			break;
+void envRemove(const char * s, env_t * e) {
+	size_t i;
+	for (i = 0; i < e->count; ++i) {
+		if (!strcmp(e->syms[i], s)) { break; }
 	}
+	// Here syms are pointers point to v->sym of v of type TYPE_SYM
+	// So do NOT free these
+	valDel(e->vars[i]);
+	memmove(&e->vars[i], &e->vars[i+1], (e->count-i-1)*sizeof(char *));
+	memmove(&e->syms[i], &e->syms[i+1], (e->count-i-1)*sizeof(val_t*));
+	
+	e->count--;
+}
+
+void envDel(env_t * e) {
+	for (size_t i = 0; i < e->count; ++i) {
+		free(e->syms);
+		free(e->vars);
+	}
+}
+
+int envBind(const char * s, val_t * v, env_t * e) {
+	for (size_t i = 0; i < e->count; ++i) {
+		if (!strcmp(e->syms[i], s) && e->vars[i] == Unbound) {
+			e->vars[i] = v;
+			return 1;
+		}
+	}
+	return 0;
 }
 
 val_t * envFind(const char * s, env_t * e) {
 	for (size_t i = 0; i < e->count; ++i) {
-		if (!strcmp(e->syms[i], s)) {
-			return e->vars[i];
-		}
+		if (!strcmp(e->syms[i], s)) { return e->vars[i]; }
 	}
 
 	if (e->parent) {
@@ -182,6 +210,37 @@ val_t * envFind(const char * s, env_t * e) {
 	}
 }
 
+val_t * apply(val_t * f, val_t * p, env_t * e) {
+	switch (f->type) {
+	case TYPE_ERR:
+		return f;
+	case TYPE_LAMBDA:
+		envBind(f->param, p, f->innerEnv);
+		return eval(f->body, f->innerEnv);
+	case TYPE_SYM:
+		return apply(eval(f,e), p, e);
+	case TYPE_NUM:
+	case TYPE_STR:
+	default:
+		return valErr("Not a lambda!");
+	}
+}
+
+val_t * eval(val_t * v, env_t * e) {
+	switch (v->type) {
+	case TYPE_ERR:
+	case TYPE_STR:
+	case TYPE_NUM:
+	case TYPE_LAMBDA:
+		return v;
+	case TYPE_SYM:
+		return envFind(v->sym,e);
+	case TYPE_APPLY:
+		return apply(v->func, v->formal, e);
+	default:
+		return valErr("Eval Error!");
+	}
+}
 
 
 
@@ -203,7 +262,7 @@ int main(void) {
 			  defination : \"def\" <identifier> '=' <expr> ;           \
               identifier : /[a-zA-Z_][a-zA-Z0-9_-!@#$^&*<>=|~]*/ ;     \
               lambda : '(' '\\\\' <identifier> '.' <expr> ')' ;        \
-              application : '(' <expr> <expr> ')' ;                    \
+              application : '{' <expr> <expr> '}' ;                    \
               expr : <identifier> | <number> | <strings>               \
 			       | <application> | <lambda>  ;                       \
 			  lizp : /^/ <defination> | <expr> /$/ ;                   \
@@ -213,8 +272,8 @@ int main(void) {
 
     puts("Lizp Version 0.0.1");
 	puts("Init global environment\n");
-	globalEnv = envNew();
-	unboundVal = valNew(TYPE_ERR);
+	GlobalEnv = envNew();
+	Unbound = valNew(TYPE_ERR);
 
     while (1) {
         char * input = readline("lambda > ");
@@ -223,7 +282,9 @@ int main(void) {
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Lizp, &r)) {
 			mpc_ast_print(r.output);
-			valPrint(valRead(r.output));
+			val_t * v = valRead(r.output);
+			valPrint(eval(v,GlobalEnv));
+			valDel(v);
             mpc_ast_delete(r.output);
         } else {
             mpc_err_print(r.error);
@@ -232,6 +293,9 @@ int main(void) {
 
         free(input);
     }
+
+	envDel(GlobalEnv);
+	valDel(Unbound);
 
     mpc_cleanup(5, Lambda, Expr, Identifier, Application, Lizp);
 
