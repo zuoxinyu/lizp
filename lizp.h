@@ -111,7 +111,7 @@ typedef struct env_t env_t;
 
 /* Lizp val_tue type */
 
-enum { TYPE_STR, TYPE_ERR, TYPE_NUM, TYPE_SYM, TYPE_LAMBDA, TYPE_APPLY };
+enum { TYPE_STR, TYPE_ERR, TYPE_NUM, TYPE_SYM, TYPE_LMD, TYPE_APL };
 
 struct val_t {
 	/* Basic infomation */
@@ -161,5 +161,6 @@ val_t * envFind(const char * sym, env_t * env);
 int envBind(const char * sym, val_t * val, env_t * env);
 void envInsert(const char * sym, val_t * val, env_t * env);
 void envRemove(const char * sym, env_t * env);
+void envPrint(env_t * env);
 
 #endif

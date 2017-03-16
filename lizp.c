@@ -1,13 +1,22 @@
 #include "lizp.h"
 #include "mpc.h"
 #include <editline/readline.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#define LOGBEGIN if(0){ printf("LOG:%s:%d> ", __func__, __LINE__);
+#define LOGEND printf("\n");}
+#define LOG(fmt,...) \
+	do { lizplog(fmt,##__VA_ARGS__); }while(0)
+
+#define VALUE_ENTRY(type,field,ptr) \
+	((type*)((char*)ptr-offsetof(type,field)))
+
 
 static env_t * GlobalEnv;
 static val_t * Unbound;
 
-#define LOG(fmt,...) do { lizplog(fmt,##__VA_ARGS__); }while(0)
 
 static inline void lizplog(char* fmt, ...) {
   va_list va;
@@ -38,11 +47,11 @@ void valDel(val_t * v) {
 		free(v->sym); break;
 	case TYPE_STR:
 		free(v->str); break;
-	case TYPE_LAMBDA:
+	case TYPE_LMD:
 		free(v->param);
 		envDel(v->innerEnv);
 		valDel(v->body); break;
-	case TYPE_APPLY:
+	case TYPE_APL:
 		valDel(v->func);
 		valDel(v->formal); break;
 	case TYPE_NUM:
@@ -88,7 +97,7 @@ val_t * valSym(const char * s) {
 }
 
 val_t * valLambda(const char * s, val_t * b) {
-	val_t * v = valNew(TYPE_LAMBDA);
+	val_t * v = valNew(TYPE_LMD);
 	v->param = strdump(s);
 	v->body = b;
 	v->innerEnv = envNew();
@@ -99,7 +108,7 @@ val_t * valLambda(const char * s, val_t * b) {
 }
 
 val_t * valApply(val_t * f, val_t * p) {
-	val_t * v = valNew(TYPE_APPLY);
+	val_t * v = valNew(TYPE_APL);
 	v->func = f;
 	v->formal = p;
 	return v;
@@ -136,21 +145,24 @@ val_t * valRead(mpc_ast_t * ast) {
 
 void valPrint(val_t * v) {
 	switch (v->type) {
-		case TYPE_ERR: printf("<ERR> %s\n", v->err); break;
-		case TYPE_STR: printf("<STR> %s\n", v->str); break;
-		case TYPE_SYM: printf("<SYM> %s\n", v->sym); break;
-		case TYPE_NUM: printf("<NUM> %ld\n", v->num); break;
-		case TYPE_LAMBDA: 
-					   printf("<LMD> \\%s.", v->param);
+		case TYPE_ERR: printf("<ERR \"%s\">", v->err); break;
+		case TYPE_SYM: printf("%s", v->sym); break;
+		case TYPE_NUM: printf("%ld", v->num); break;
+		case TYPE_STR: printf("%s", v->str); break;
+		case TYPE_LMD: 
+					   printf("(\\%s.", v->param);
 					   valPrint(v->body);
+					   printf(")");
 					   break;
-		case TYPE_APPLY:
-					   printf("<APL> ");
+		case TYPE_APL:
+					   printf("{");
 					   valPrint(v->func);
+					   printf(" ");
 					   valPrint(v->formal);
+					   printf("}");
 					   break;
 		default:
-					   printf("ERR!\n");
+					   printf("UnkownType!");
 
 	}
 }
@@ -191,6 +203,11 @@ void envDel(env_t * e) {
 int envBind(const char * s, val_t * v, env_t * e) {
 	for (size_t i = 0; i < e->count; ++i) {
 		if (!strcmp(e->syms[i], s) && e->vars[i] == Unbound) {
+			LOGBEGIN
+				LOG("symbol '%s' is bound to ", s);
+				valPrint(VALUE_ENTRY(val_t,innerEnv,e));
+				envPrint(e);
+			LOGEND
 			e->vars[i] = v;
 			return 1;
 		}
@@ -200,23 +217,44 @@ int envBind(const char * s, val_t * v, env_t * e) {
 
 val_t * envFind(const char * s, env_t * e) {
 	for (size_t i = 0; i < e->count; ++i) {
-		if (!strcmp(e->syms[i], s)) { return e->vars[i]; }
+		if (!strcmp(e->syms[i], s)) { 
+			LOGBEGIN
+				LOG("symbol '%s' is found in env of ", s);
+				valPrint(VALUE_ENTRY(val_t,innerEnv,e));
+			LOGEND
+			return e->vars[i]; 
+		}
 	}
 
 	if (e->parent) {
 		return envFind(s, e->parent);
-	} else {
-		return NULL;
+	} 
+	LOGBEGIN
+		printf("Current Lambda: ");
+		valPrint(VALUE_ENTRY(val_t,innerEnv,e));
+		printf(" symbol '%s' not found!", s);
+	LOGEND
+	return NULL;
+}
+
+void envPrint(env_t * e) {
+	printf(" Env={");
+	for (size_t i = 0; i < e->count; ++i) {
+		printf("[%s,", e->syms[i]);
+		valPrint(e->vars[i]);
+		printf("]");
 	}
+	printf("}");
 }
 
 val_t * apply(val_t * f, val_t * p, env_t * e) {
 	switch (f->type) {
 	case TYPE_ERR:
 		return f;
-	case TYPE_LAMBDA:
-		envBind(f->param, p, f->innerEnv);
+	case TYPE_LMD:
+		envBind(f->param, eval(p,e), f->innerEnv);
 		return eval(f->body, f->innerEnv);
+	case TYPE_APL:
 	case TYPE_SYM:
 		return apply(eval(f,e), p, e);
 	case TYPE_NUM:
@@ -231,17 +269,29 @@ val_t * eval(val_t * v, env_t * e) {
 	case TYPE_ERR:
 	case TYPE_STR:
 	case TYPE_NUM:
-	case TYPE_LAMBDA:
+	case TYPE_LMD: //Maybe 
 		return v;
 	case TYPE_SYM:
-		return envFind(v->sym,e);
-	case TYPE_APPLY:
+		return envFind(v->sym,e)?:valErr("Symbol '%s' not bound!", v->sym);
+	case TYPE_APL:
 		return apply(v->func, v->formal, e);
 	default:
 		return valErr("Eval Error!");
 	}
 }
 
+void linkScope(val_t * l, env_t * e) {
+	/* {{(\x.(\y.{x y})) (\z.z)} "2"} */
+	if (l->type == TYPE_LMD) {
+		l->innerEnv->parent = e; 
+		linkScope(l->body, l->innerEnv);
+		return;
+	} else if (l->type == TYPE_APL) {
+		linkScope(l->func, e);
+		linkScope(l->formal, e);
+		return;
+	}
+}
 
 
 int main(void) {
@@ -272,18 +322,29 @@ int main(void) {
 
     puts("Lizp Version 0.0.1");
 	puts("Init global environment\n");
-	GlobalEnv = envNew();
+
+	val_t *GlobalEnvEntry = valLambda("GLOBAL ENV CONTAINER", NULL);
+	GlobalEnvEntry->body = valStr("GLOBAL ENV CONTAINER");
+	GlobalEnvEntry->innerEnv->parent = NULL;
+	GlobalEnv = GlobalEnvEntry->innerEnv;
 	Unbound = valNew(TYPE_ERR);
 
     while (1) {
-        char * input = readline("lambda > ");
+        char * input = readline("lizp> ");
         add_history(input);
 
         mpc_result_t r;
         if (mpc_parse("<stdin>", input, Lizp, &r)) {
 			mpc_ast_print(r.output);
 			val_t * v = valRead(r.output);
-			valPrint(eval(v,GlobalEnv));
+
+			linkScope(v, GlobalEnv);
+
+			val_t * ve = (eval(v, GlobalEnv));
+			LOGBEGIN printf("Eval finish"); LOGEND
+			valPrint(ve);
+
+			printf("\n");
 			valDel(v);
             mpc_ast_delete(r.output);
         } else {
