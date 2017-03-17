@@ -148,16 +148,16 @@ struct env_t {
 	env_t ** children;
 #endif
 	size_t count;
-	const char ** syms;
+	char ** syms;
 	val_t ** vars;
 };
 
 env_t * envNew(void);
 void    envDel(env_t * env);
 val_t * envFind(const char * sym, env_t * env);
-int envBind(const char * sym, val_t * val, env_t * env);
-void envInsert(const char * sym, val_t * val, env_t * env);
-void envRemove(const char * sym, env_t * env);
-void envPrint(env_t * env);
+int     envBind(const char * sym, val_t * val, env_t * env);
+int     envInsert(const char * sym, val_t * val, env_t * env);
+void    envRemove(const char * sym, env_t * env);
+void    envPrint(env_t * env);
 
 #endif

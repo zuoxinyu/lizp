@@ -6,7 +6,7 @@
 #include "mpc.h"
 
 #define ZDEBUG 1
-#define LOGBEGIN if(zdebug){ printf("LOG:%s:%d> ", __func__, __LINE__);
+#define LOGBEGIN if(zdebug&&ZDEBUG){ printf("LOG:%s:%d> ", __func__, __LINE__);
 #define LOGEND printf("\n");}
 #define LOG(fmt,...) \
     do { lizplog(fmt,##__VA_ARGS__); }while(0)
@@ -17,7 +17,7 @@
 */
 /* Singleton */
 static val_t * Unbound;
-int zdebug = 1;
+int zdebug = 0;
 
 static inline void lizplog(char* fmt, ...) {
   va_list va;
@@ -177,7 +177,8 @@ env_t * envNew(void) {
     return calloc(1, sizeof(env_t));
 }
 
-void envInsert(const char * s, val_t * v, env_t * e) {
+int envInsert(const char * s, val_t * v, env_t * e) {
+	if (envFind(s,e)) return 0;
     e->syms = realloc(e->syms, sizeof(char *)*(e->count+1));
     e->vars = realloc(e->vars, sizeof(val_t*)*(e->count+1));
     e->syms[e->count] = strdump(s); //Not strdump
@@ -186,6 +187,7 @@ void envInsert(const char * s, val_t * v, env_t * e) {
     LOGBEGIN
         envPrint(e);
     LOGEND
+	return 1;
 }
 
 void envRemove(const char * s, env_t * e) {
@@ -193,8 +195,8 @@ void envRemove(const char * s, env_t * e) {
     for (i = 0; i < e->count; ++i) {
         if (!strcmp(e->syms[i], s)) { break; }
     }
-    // Here syms are pointers point to v->sym of v of type TYPE_SYM
-    // So do NOT free these
+
+	free(e->syms[i]);
     valDel(e->vars[i]);
     memmove(&e->vars[i], &e->vars[i+1], (e->count-i-1)*sizeof(char *));
     memmove(&e->syms[i], &e->syms[i+1], (e->count-i-1)*sizeof(val_t*));
@@ -202,11 +204,14 @@ void envRemove(const char * s, env_t * e) {
     e->count--;
 }
 
+/* Should it free syms and vars ? */
 void envDel(env_t * e) {
     for (size_t i = 0; i < e->count; ++i) {
-        free(e->syms);
-        free(e->vars);
+        free(e->syms[i]);
     }
+	free(e->syms);
+	free(e->vars);
+	free(e);
 }
 
 int envBind(const char * s, val_t * v, env_t * e) {
@@ -258,14 +263,7 @@ val_t * apply(val_t * l, val_t * r, env_t * e) {
     case TYPE_ERR:
         return l;
     case TYPE_LMD:
-        envBind(l->s, eval(r,e), l->innerEnv);
-            LOGBEGIN
-                printf("in lambda ");
-                valPrint(l);
-                printf("bind l->s('%s') to r ", l->s);
-                valPrint(r);
-                envPrint(l->innerEnv);
-            LOGEND
+        envBind(l->s, r, l->innerEnv);
         return eval(l->body, l->innerEnv);
     case TYPE_APL:
     case TYPE_SYM:
@@ -283,15 +281,7 @@ val_t * eval(val_t * v, env_t * e) {
     case TYPE_STR:
     case TYPE_NUM:
         return v;
-    case TYPE_LMD: //Maybe
-        LOGBEGIN
-            printf("in lambda ");
-            valPrint(v);
-            envPrint(v->innerEnv);
-            printf(" parent env: ");
-            envPrint(v->innerEnv->parent);
-            printf("\n");
-        LOGEND
+    case TYPE_LMD: //Maybe return a closure?
         return v;
     case TYPE_SYM:
         return envFind(v->s,e)?:valErr("Symbol '%s' is not bound!", v->s);
@@ -317,7 +307,9 @@ void linkScope(val_t * l, env_t * e) {
 
 void def(mpc_ast_t * ast, env_t * e) {
     /* def <smb> = <expr> */
-    envInsert(ast->children[1]->contents, eval(valRead(ast->children[3]),e), e);
+	char * s = ast->children[1]->contents;
+    int r = envInsert(s, eval(valRead(ast->children[3]),e), e);
+	if (!r) printf("Error: '%s' has been bound\n", s);
 }
 
 void interprete(mpc_ast_t * ast, env_t * e) {
@@ -339,8 +331,8 @@ void interprete(mpc_ast_t * ast, env_t * e) {
 
 int main(int argc, char ** argv) {
 
-    if (argc >= 2) {
-        zdebug = 0;
+    if (argc >= 2 && !strcmp(argv[1], "-v")) {
+        zdebug = 1;
     }
     
     mpc_parser_t * Identifier  = mpc_new("identifier");
@@ -371,7 +363,7 @@ int main(int argc, char ** argv) {
     puts("Init global environment\n");
 
     Unbound = valNew(TYPE_ERR);
-    Unbound->s = "(Singleton)Unbound";
+    Unbound->s = "(Singleton)";
     val_t *GlobalEnvEntry = valLambda("GLOBAL ENV CONTAINER", NULL);
     GlobalEnvEntry->body = valStr("GLOBAL ENV CONTAINER");
     GlobalEnvEntry->innerEnv->parent = NULL;
