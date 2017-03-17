@@ -10,13 +10,12 @@
 #define LOG(fmt,...) \
     do { lizplog(fmt,##__VA_ARGS__); }while(0)
 
-#define VALUE_ENTRY(type,field,ptr) \
-    ((type*)((char*)ptr-offsetof(type,field)))
+#define container_of(ptr, type, member) ({ \
+     const typeof( ((type *)0)->member ) *__mptr = (ptr); \
+     (type *)( (char *)__mptr - offsetof(type,member) );})
 
-
-static env_t * GlobalEnv;
+/* Singleton */
 static val_t * Unbound;
-
 
 static inline void lizplog(char* fmt, ...) {
   va_list va;
@@ -25,12 +24,20 @@ static inline void lizplog(char* fmt, ...) {
   va_end(va);  
 }
 
-char * strdump(const char * s) {
+static inline char * strdump(const char * s) {
     size_t len = strlen(s);
     char * newStr = malloc(len+1);
     strncpy(newStr, s, len);
     newStr[len] = '\0';
     return newStr;
+}
+
+static inline int isBound(val_t * l) {
+    return envFind(l->s, l->innerEnv) != Unbound;
+}
+
+static inline val_t * valEntry(env_t ** e) {
+    return container_of(e,val_t,innerEnv);
 }
 
 val_t * valNew(int t) {
@@ -140,10 +147,6 @@ val_t * valRead(mpc_ast_t * ast) {
     }
 }
 
-static inline int isBound(val_t * l) {
-    return envFind(l->s, l->innerEnv) != Unbound;
-}
-
 void valPrint(val_t * v) {
     switch (v->type) {
         case TYPE_ERR: printf("<ERR \"%s\">", v->s); break;
@@ -204,12 +207,12 @@ void envDel(env_t * e) {
 int envBind(const char * s, val_t * v, env_t * e) {
     for (size_t i = 0; i < e->count; ++i) {
         if (!strcmp(e->syms[i], s) && e->vars[i] == Unbound) {
+            e->vars[i] = v;
             LOGBEGIN
                 LOG("symbol '%s' is bound to ", s);
-                valPrint(VALUE_ENTRY(val_t,innerEnv,e));
+                valPrint(v);
                 envPrint(e);
             LOGEND
-            e->vars[i] = v;
             return 1;
         }
     }
@@ -218,12 +221,11 @@ int envBind(const char * s, val_t * v, env_t * e) {
 
 val_t * envFind(const char * s, env_t * e) {
     for (size_t i = 0; i < e->count; ++i) {
-        if (!strcmp(e->syms[i], s)) { 
+        if (!strcmp(e->syms[i], s)) {
             LOGBEGIN
-                LOG("symbol '%s' is found in env of ", s);
-                valPrint(VALUE_ENTRY(val_t,innerEnv,e));
+                envPrint(e);
             LOGEND
-            return e->vars[i]; 
+            return e->vars[i];
         }
     }
 
@@ -231,8 +233,6 @@ val_t * envFind(const char * s, env_t * e) {
         return envFind(s, e->parent);
     } 
     LOGBEGIN
-        printf("Current Lambda: ");
-        valPrint(VALUE_ENTRY(val_t,innerEnv,e));
         printf(" symbol '%s' not found!", s);
     LOGEND
     return NULL;
@@ -253,7 +253,14 @@ val_t * apply(val_t * l, val_t * r, env_t * e) {
     case TYPE_ERR:
         return l;
     case TYPE_LMD:
-        envBind(l->s, r, l->innerEnv);
+        envBind(l->s, eval(r,e), l->innerEnv);
+            LOGBEGIN
+                printf("in lambda ");
+                valPrint(l);
+                printf("bind l->s('%s') to r ", l->s);
+                valPrint(r);
+                envPrint(l->innerEnv);
+            LOGEND
         return eval(l->body, l->innerEnv);
     case TYPE_APL:
     case TYPE_SYM:
@@ -270,12 +277,21 @@ val_t * eval(val_t * v, env_t * e) {
     case TYPE_ERR:
     case TYPE_STR:
     case TYPE_NUM:
-    case TYPE_LMD: //Maybe 
+        return v;
+    case TYPE_LMD: //Maybe
+        LOGBEGIN
+            printf("in lambda ");
+            valPrint(v);
+            envPrint(v->innerEnv);
+            printf(" parent env: ");
+            envPrint(v->innerEnv->parent);
+            printf("\n");
+        LOGEND
         return v;
     case TYPE_SYM:
         return envFind(v->s,e)?:valErr("Symbol '%s' is not bound!", v->s);
     case TYPE_APL:
-        return apply(v->left, v->right, e);
+        return apply(eval(v->left,e), eval(v->right,e), e);
     default:
         return valErr("Eval Error!");
     }
@@ -327,8 +343,9 @@ int main(void) {
     val_t *GlobalEnvEntry = valLambda("GLOBAL ENV CONTAINER", NULL);
     GlobalEnvEntry->body = valStr("GLOBAL ENV CONTAINER");
     GlobalEnvEntry->innerEnv->parent = NULL;
-    GlobalEnv = GlobalEnvEntry->innerEnv;
+    env_t * GlobalEnv = GlobalEnvEntry->innerEnv;
     Unbound = valNew(TYPE_ERR);
+    Unbound->s = "(Singleton)Unbound";
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
@@ -340,6 +357,7 @@ int main(void) {
         if (mpc_parse("tests/test.lz", input, Lizp, &r)) {
             mpc_ast_print(r.output);
             val_t * v = valRead(r.output);
+            LOGBEGIN valPrint(v); LOGEND
 
             linkScope(v, GlobalEnv);
 
