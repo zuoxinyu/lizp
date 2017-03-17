@@ -42,18 +42,16 @@ val_t * valNew(int t) {
 void valDel(val_t * v) {
     switch (v->type) {
     case TYPE_ERR:
-        free(v->err); break;
     case TYPE_SYM:
-        free(v->sym); break;
     case TYPE_STR:
-        free(v->str); break;
+        free(v->s); break;
     case TYPE_LMD:
-        free(v->param);
+        free(v->s);
         envDel(v->innerEnv);
         valDel(v->body); break;
     case TYPE_APL:
-        valDel(v->func);
-        valDel(v->formal); break;
+        valDel(v->left);
+        valDel(v->right); break;
     case TYPE_NUM:
     default:
         break;
@@ -64,10 +62,10 @@ void valDel(val_t * v) {
 
 val_t * valErr(const char * fmt, ...) {
     val_t * v = valNew(TYPE_ERR);
-    v->err = calloc(512, 1);
+    v->s = calloc(512, 1);
     va_list va;
     va_start(va, fmt);
-    vsnprintf(v->err, 512, fmt, va);
+    vsnprintf(v->s, 512, fmt, va);
     va_end(va);
     return v;
 }
@@ -86,42 +84,41 @@ val_t * valNumFromStr(const char * s) {
 
 val_t * valStr(const char * s) {
     val_t * v = valNew(TYPE_STR);
-    v->str = strdump(s);
+    v->s = strdump(s);
     return v;
 }
 
 val_t * valSym(const char * s) {
     val_t * v = valNew(TYPE_SYM);
-    v->sym = strdump(s);
+    v->s = strdump(s);
     return v;
 }
 
 val_t * valLambda(const char * s, val_t * b) {
     val_t * v = valNew(TYPE_LMD);
-    v->param = strdump(s);
+    v->s = strdump(s);
     v->body = b;
     v->innerEnv = envNew();
-    /* If in a lambda inner env a peter points to Unbound,
-       it means that the peter has not been bound */
+    /* If in a lambda inner env a pointer points to Unbound,
+       it means that the pointer has not been bound */
     envInsert(s, Unbound, v->innerEnv); 
     return v;
 }
 
-val_t * valApply(val_t * f, val_t * p) {
+val_t * valApply(val_t * l, val_t * r) {
     val_t * v = valNew(TYPE_APL);
-    v->func = f;
-    v->formal = p;
+    v->left = l;
+    v->right = r;
     return v;
 }
 
 val_t * valReadLambda(mpc_ast_t * ast) {
-    /* (\<param>.<expr>)*/
+    /* (\<str>.<expr>)*/
     return  valLambda(ast->children[2]->contents, valRead(ast->children[4]));
 }
 
 val_t * valReadApply(mpc_ast_t * ast) {
-    /* (<expr> <expr>) */
-    //printf("Application: childNumber <%d>", ast->children_num);
+    /* {<expr> <expr>} */
     return valApply(valRead(ast->children[1]), valRead(ast->children[2]));
 }
 
@@ -143,24 +140,28 @@ val_t * valRead(mpc_ast_t * ast) {
     }
 }
 
+static inline int isBound(val_t * l) {
+    return envFind(l->s, l->innerEnv) != Unbound;
+}
+
 void valPrint(val_t * v) {
     switch (v->type) {
-        case TYPE_ERR: printf("<ERR \"%s\">", v->err); break;
-        case TYPE_SYM: printf("%s", v->sym); break;
+        case TYPE_ERR: printf("<ERR \"%s\">", v->s); break;
         case TYPE_NUM: printf("%ld", v->num); break;
-        case TYPE_STR: printf("%s", v->str); break;
+        case TYPE_SYM: printf("%s", v->s); break;
+        case TYPE_STR: printf("%s", v->s); break;
         case TYPE_LMD: 
-                       printf("(\\%s.", v->param);
-                       valPrint(v->body);
-                       printf(")");
-                       break;
+                        printf("(\\%s.", v->s);
+                        valPrint(v->body);
+                        printf(")");
+                        break;
         case TYPE_APL:
-                       printf("{");
-                       valPrint(v->func);
-                       printf(" ");
-                       valPrint(v->formal);
-                       printf("}");
-                       break;
+                        printf("{");
+                        valPrint(v->left);
+                        printf(" ");
+                        valPrint(v->right);
+                        printf("}");
+                        break;
         default:
                        printf("UnkownType!");
 
@@ -247,16 +248,16 @@ void envPrint(env_t * e) {
     printf("}");
 }
 
-val_t * apply(val_t * f, val_t * p, env_t * e) {
-    switch (f->type) {
+val_t * apply(val_t * l, val_t * r, env_t * e) {
+    switch (l->type) {
     case TYPE_ERR:
-        return f;
+        return l;
     case TYPE_LMD:
-        envBind(f->param, eval(p,e), f->innerEnv);
-        return eval(f->body, f->innerEnv);
+        envBind(l->s, r, l->innerEnv);
+        return eval(l->body, l->innerEnv);
     case TYPE_APL:
     case TYPE_SYM:
-        return apply(eval(f,e), p, e);
+        return apply(eval(l,e), eval(r,e), e);
     case TYPE_NUM:
     case TYPE_STR:
     default:
@@ -272,9 +273,9 @@ val_t * eval(val_t * v, env_t * e) {
     case TYPE_LMD: //Maybe 
         return v;
     case TYPE_SYM:
-        return envFind(v->sym,e)?:valErr("Symbol '%s' not bound!", v->sym);
+        return envFind(v->s,e)?:valErr("Symbol '%s' is not bound!", v->s);
     case TYPE_APL:
-        return apply(v->func, v->formal, e);
+        return apply(v->left, v->right, e);
     default:
         return valErr("Eval Error!");
     }
@@ -287,8 +288,8 @@ void linkScope(val_t * l, env_t * e) {
         linkScope(l->body, l->innerEnv);
         return;
     } else if (l->type == TYPE_APL) {
-        linkScope(l->func, e);
-        linkScope(l->formal, e);
+        linkScope(l->left, e);
+        linkScope(l->right, e);
         return;
     }
 }
@@ -302,22 +303,22 @@ int main(void) {
     mpc_parser_t * Lambda      = mpc_new("lambda");
     mpc_parser_t * Application = mpc_new("application");
     mpc_parser_t * Expr        = mpc_new("expr");
-    mpc_parser_t * Defination  = mpc_new("defination");
+    mpc_parser_t * Definition  = mpc_new("definition");
     mpc_parser_t * Lizp        = mpc_new("lizp");
 
     mpca_lang(MPCA_LANG_DEFAULT, 
             "                                                          \
               number : /-?[0-9]+/ ;                                    \
               strings : /\"(\\\\.|[^\"])*\"/ ;                         \
-              defination : \"def\" <identifier> '=' <expr> ;           \
+              definition : \"def\" <identifier> '=' <expr> ;           \
               identifier : /[a-zA-Z_][a-zA-Z0-9_-!@#$^&*<>=|~]*/ ;     \
               lambda : '(' '\\\\' <identifier> '.' <expr> ')' ;        \
               application : '{' <expr> <expr> '}' ;                    \
               expr : <identifier> | <number> | <strings>               \
                    | <application> | <lambda>  ;                       \
-              lizp : /^/ <defination> | <expr> /$/ ;                   \
+              lizp : /^/ <definition> | <expr> /$/ ;                   \
             ",
-            Defination, Number, Strings, Identifier,
+            Definition, Number, Strings, Identifier,
             Application, Lambda, Expr, Lizp);
 
     puts("Lizp Version 0.0.1");
@@ -329,12 +330,14 @@ int main(void) {
     GlobalEnv = GlobalEnvEntry->innerEnv;
     Unbound = valNew(TYPE_ERR);
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
     while (1) {
         char * input = readline("lizp> ");
         add_history(input);
 
         mpc_result_t r;
-        if (mpc_parse("<stdin>", input, Lizp, &r)) {
+        if (mpc_parse("tests/test.lz", input, Lizp, &r)) {
             mpc_ast_print(r.output);
             val_t * v = valRead(r.output);
 
@@ -354,8 +357,9 @@ int main(void) {
 
         free(input);
     }
+#pragma clang diagnostic pop
 
-    envDel(GlobalEnv);
+    valDel(GlobalEnvEntry);
     valDel(Unbound);
 
     mpc_cleanup(5, Lambda, Expr, Identifier, Application, Lizp);

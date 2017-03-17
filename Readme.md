@@ -23,7 +23,7 @@ Lizp is a functional language which based on lambda calculus.
 
 ## Code Sample
 
-- Lambda Defination
+- Lambda Definition
 ```
   (\x.x)
 ```
@@ -40,7 +40,7 @@ Lizp is a functional language which based on lambda calculus.
     -> (\y.z+y) 
 ```
     
-- Function Defination
+- Function Definition
 ```
   def add1 = (\x.x+1)
 ```
@@ -53,7 +53,7 @@ Lizp is a functional language which based on lambda calculus.
         -> 3
 ```
         
-- High level function defination
+- High level function definition
   - To apply  a lambda
 ```
     def apply = (\f.(\x.f x))
@@ -83,7 +83,7 @@ Lizp is a functional language which based on lambda calculus.
         -> (\x.x+2)
 ```
         
-- Variable Defination
+- Variable Definition
 ```
   def var = 1
 ```

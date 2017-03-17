@@ -118,25 +118,22 @@ struct val_t {
 	int type;
 	/* Basic values */
 	long num;
-	char * sym;
-	char * str;
-	char * err;
+    /* String/Error/Lambda parameter/Symbol */
+	char * s;
 	/* For lambda and function */
-	char * param;
 	val_t * body;
-	
 	env_t * innerEnv;
 
 	/* For application */
-	val_t * func;
-	val_t * formal;
+	val_t * left;
+	val_t * right;
 };
 
 val_t * valNew(int type);
 void    valDel(val_t * val);
 val_t * valRead(mpc_ast_t * ast);
 val_t * eval(val_t * val, env_t * env);
-val_t * apply(val_t * lambda, val_t * param, env_t * env);
+val_t * apply(val_t * l, val_t * r, env_t * env);
 
 //val_t * eval(val_t * val);
 
