@@ -1,21 +1,23 @@
-#include "lizp.h"
-#include "mpc.h"
-#include <editline/readline.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <editline/readline.h>
+#include "lizp.h"
+#include "mpc.h"
 
-#define LOGBEGIN if(0){ printf("LOG:%s:%d> ", __func__, __LINE__);
+#define ZDEBUG 1
+#define LOGBEGIN if(zdebug){ printf("LOG:%s:%d> ", __func__, __LINE__);
 #define LOGEND printf("\n");}
 #define LOG(fmt,...) \
     do { lizplog(fmt,##__VA_ARGS__); }while(0)
-
+/*
 #define container_of(ptr, type, member) ({ \
-     const typeof( ((type *)0)->member ) *__mptr = (ptr); \
+     const typeof( ((type *)0)->member ) *__mptr = ptr; \
      (type *)( (char *)__mptr - offsetof(type,member) );})
-
+*/
 /* Singleton */
 static val_t * Unbound;
+int zdebug = 1;
 
 static inline void lizplog(char* fmt, ...) {
   va_list va;
@@ -35,10 +37,10 @@ static inline char * strdump(const char * s) {
 static inline int isBound(val_t * l) {
     return envFind(l->s, l->innerEnv) != Unbound;
 }
-
+/*
 static inline val_t * valEntry(env_t ** e) {
     return container_of(e,val_t,innerEnv);
-}
+}*/
 
 val_t * valNew(int t) {
     val_t * v = calloc(1,sizeof(val_t));
@@ -178,9 +180,12 @@ env_t * envNew(void) {
 void envInsert(const char * s, val_t * v, env_t * e) {
     e->syms = realloc(e->syms, sizeof(char *)*(e->count+1));
     e->vars = realloc(e->vars, sizeof(val_t*)*(e->count+1));
-    e->syms[e->count] = s; //Not strdump
+    e->syms[e->count] = strdump(s); //Not strdump
     e->vars[e->count] = v;
     e->count++;
+    LOGBEGIN
+        envPrint(e);
+    LOGEND
 }
 
 void envRemove(const char * s, env_t * e) {
@@ -239,7 +244,7 @@ val_t * envFind(const char * s, env_t * e) {
 }
 
 void envPrint(env_t * e) {
-    printf(" Env={");
+    printf(" Env= Count(%lu){", e->count);
     for (size_t i = 0; i < e->count; ++i) {
         printf("[%s,", e->syms[i]);
         valPrint(e->vars[i]);
@@ -310,8 +315,33 @@ void linkScope(val_t * l, env_t * e) {
     }
 }
 
+void def(mpc_ast_t * ast, env_t * e) {
+    /* def <smb> = <expr> */
+    envInsert(ast->children[1]->contents, eval(valRead(ast->children[3]),e), e);
+}
 
-int main(void) {
+void interprete(mpc_ast_t * ast, env_t * e) {
+    mpc_ast_t * definiation = ast->children[1];
+    if (strstr(definiation->tag, "definition") ) {
+        def(definiation, e);
+    } else {
+        val_t * v = valRead(ast);
+        LOGBEGIN valPrint(v); LOGEND
+
+        linkScope(v, e);
+
+        val_t * ve = (eval(v, e));
+        LOGBEGIN printf("Eval finish"); LOGEND
+        valPrint(ve);
+        printf("\n");
+    }
+}
+
+int main(int argc, char ** argv) {
+
+    if (argc >= 2) {
+        zdebug = 0;
+    }
     
     mpc_parser_t * Identifier  = mpc_new("identifier");
     mpc_parser_t * Number      = mpc_new("number");
@@ -340,12 +370,12 @@ int main(void) {
     puts("Lizp Version 0.0.1");
     puts("Init global environment\n");
 
+    Unbound = valNew(TYPE_ERR);
+    Unbound->s = "(Singleton)Unbound";
     val_t *GlobalEnvEntry = valLambda("GLOBAL ENV CONTAINER", NULL);
     GlobalEnvEntry->body = valStr("GLOBAL ENV CONTAINER");
     GlobalEnvEntry->innerEnv->parent = NULL;
     env_t * GlobalEnv = GlobalEnvEntry->innerEnv;
-    Unbound = valNew(TYPE_ERR);
-    Unbound->s = "(Singleton)Unbound";
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
@@ -354,19 +384,9 @@ int main(void) {
         add_history(input);
 
         mpc_result_t r;
-        if (mpc_parse("tests/test.lz", input, Lizp, &r)) {
-            mpc_ast_print(r.output);
-            val_t * v = valRead(r.output);
-            LOGBEGIN valPrint(v); LOGEND
-
-            linkScope(v, GlobalEnv);
-
-            val_t * ve = (eval(v, GlobalEnv));
-            LOGBEGIN printf("Eval finish"); LOGEND
-            valPrint(ve);
-
-            printf("\n");
-            valDel(v);
+        if (mpc_parse("<stdin>", input, Lizp, &r)) {
+            LOGBEGIN mpc_ast_print(r.output); LOGEND
+            interprete(r.output, GlobalEnv);
             mpc_ast_delete(r.output);
         } else {
             mpc_err_print(r.error);
