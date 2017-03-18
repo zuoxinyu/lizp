@@ -8,7 +8,7 @@
 #define ZDEBUG 1
 #define LOGBEGIN \
 	if(zdebug&&ZDEBUG){ \
-		printf("LOG:%s:%d> ", __func__, __LINE__);
+		printf("LOG:%-10s:%4d> ", __func__, __LINE__);
 #define LOGEND \
 		printf("\n"); \
 	}
@@ -134,7 +134,7 @@ val_t * valApply(val_t * l, val_t * r) {
 
 val_t * valReadLambda(mpc_ast_t * ast) {
     /* (\<str>.<expr>)*/
-    return  valLambda(ast->children[2]->contents, valRead(ast->children[4]));
+    return valLambda(ast->children[2]->contents, valRead(ast->children[4]));
 }
 
 val_t * valReadApply(mpc_ast_t * ast) {
@@ -176,7 +176,7 @@ void valPrint(val_t * v) {
                        valPrint(v->right);
                        printf("}");
                        break;
-        default:       printf("UnkownType!");
+        default:       valPrint(valErr("UnkownType!"));
     }
 }
 
@@ -228,6 +228,7 @@ int envBind(const char * s, val_t * v, env_t * e) {
             LOGBEGIN
                 LOG("symbol '%s' is bound to ", s);
                 valPrint(v);
+				printf(" ");
                 envPrint(e);
             LOGEND
             return 1;
@@ -239,7 +240,6 @@ int envBind(const char * s, val_t * v, env_t * e) {
 int envDeBind(const char * s, env_t * e) {
     for (size_t i = 0; i < e->count; ++i) {
         if (!strcmp(e->syms[i], s) && e->vars[i] != Unbound) {
-			valGC(e->vars[i]); // Garbage?
             e->vars[i] = Unbound;
             LOGBEGIN
                 LOG("symbol '%s' is bound to ", s);
@@ -266,17 +266,17 @@ val_t * envFind(const char * s, env_t * e) {
         return envFind(s, e->parent);
     } 
     LOGBEGIN
-        printf(" symbol '%s' not found!", s);
+        printf("symbol '%s' not found!", s);
     LOGEND
     return NULL;
 }
 
 void envPrint(env_t * e) {
-    printf(" Env= Count(%lu){", e->count);
+    printf("Env[%lu]={ ", e->count);
     for (size_t i = 0; i < e->count; ++i) {
         printf("[%s,", e->syms[i]);
         valPrint(e->vars[i]);
-        printf("]");
+        printf("] ");
     }
     printf("}");
 }
@@ -291,7 +291,7 @@ val_t * apply(val_t * l, val_t * r, env_t * e) {
 		return eval(l->body, l->innerEnv);
     case TYPE_APL:
     case TYPE_SYM:
-        return apply(eval(l,e), eval(r,e), e);
+        return apply(eval(l,e), r, e);
     case TYPE_NUM:
     case TYPE_STR:
     default:
@@ -321,19 +321,26 @@ void linkScope(val_t * l, env_t * e) {
     if (l->type == TYPE_LMD) {
         l->innerEnv->parent = e; 
         linkScope(l->body, l->innerEnv);
+		LOGBEGIN
+			envPrint(l->innerEnv);
+			envPrint(e);
+		LOGEND
         return;
     } else if (l->type == TYPE_APL) {
         linkScope(l->left, e);
         linkScope(l->right, e);
         return;
-    }
+	} else if (l->type == TYPE_SYM) {
+		linkScope(envFind(l->s,e), e);
+		return;
+	}
 }
 
 void def(mpc_ast_t * ast, env_t * e) {
     /* def <smb> = <expr> */
 	char * s = ast->children[1]->contents;
     int r = envInsert(s, eval(valRead(ast->children[3]),e), e);
-	if (!r) printf("Error: '%s' has been bound\n", s);
+	if (!r) printf("Error: '%s' has already been bound\n", s);
 }
 
 void interprete(mpc_ast_t * ast, env_t * e) {
@@ -390,8 +397,8 @@ int main(int argc, char ** argv) {
 
     Unbound = valNew(TYPE_ERR);
     Unbound->s = "(Singleton)";
-    val_t *GlobalEnvEntry = valLambda("GLOBAL ENV CONTAINER", NULL);
-    GlobalEnvEntry->body = valStr("GLOBAL ENV CONTAINER");
+    val_t *GlobalEnvEntry = valLambda("(GLOBAL)", NULL);
+    GlobalEnvEntry->body = valStr("(GLOBAL)");
     GlobalEnvEntry->innerEnv->parent = NULL;
     env_t * GlobalEnv = GlobalEnvEntry->innerEnv;
 

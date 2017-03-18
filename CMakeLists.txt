@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.6)
 project(lizp)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c11 -ledit")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c11 -g -ledit")
 
 include_directories(/usr/include/readline)
 set(SOURCE_FILES
