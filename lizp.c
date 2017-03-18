@@ -6,20 +6,18 @@
 #include "mpc.h"
 
 #define ZDEBUG 1
-#define LOGBEGIN if(zdebug&&ZDEBUG){ printf("LOG:%s:%d> ", __func__, __LINE__);
-#define LOGEND printf("\n");}
-#define LOG(fmt,...) \
-    do { lizplog(fmt,##__VA_ARGS__); }while(0)
-/*
-#define container_of(ptr, type, member) ({ \
-     const typeof( ((type *)0)->member ) *__mptr = ptr; \
-     (type *)( (char *)__mptr - offsetof(type,member) );})
-*/
+#define LOGBEGIN \
+	if(zdebug&&ZDEBUG){ \
+		printf("LOG:%s:%d> ", __func__, __LINE__);
+#define LOGEND \
+		printf("\n"); \
+	}
+
 /* Singleton */
 static val_t * Unbound;
 int zdebug = 0;
 
-static inline void lizplog(char* fmt, ...) {
+static inline void LOG(char* fmt, ...) {
   va_list va;
   va_start(va, fmt);  
   vprintf(fmt, va);  
@@ -37,10 +35,6 @@ static inline char * strdump(const char * s) {
 static inline int isBound(val_t * l) {
     return envFind(l->s, l->innerEnv) != Unbound;
 }
-/*
-static inline val_t * valEntry(env_t ** e) {
-    return container_of(e,val_t,innerEnv);
-}*/
 
 val_t * valNew(int t) {
     val_t * v = calloc(1,sizeof(val_t));
@@ -69,6 +63,24 @@ void valDel(val_t * v) {
     free(v);
 }
 
+/* Garbage Collect 
+ * Maybe need references-count
+ * */
+void valGC(val_t * v) {
+    switch (v->type) {
+    case TYPE_ERR:
+    case TYPE_STR:
+    case TYPE_LMD:
+    case TYPE_APL:
+    case TYPE_NUM:
+		valDel(v);
+		break;
+	case TYPE_SYM:
+    default:
+		return;
+    }
+}
+
 val_t * valErr(const char * fmt, ...) {
     val_t * v = valNew(TYPE_ERR);
     v->s = calloc(512, 1);
@@ -78,7 +90,6 @@ val_t * valErr(const char * fmt, ...) {
     va_end(va);
     return v;
 }
-
 
 val_t * valNum(long x) {
     val_t * v = valNew(TYPE_NUM);
@@ -137,7 +148,7 @@ val_t * valRead(mpc_ast_t * ast) {
     } else if (strstr(ast->tag, "number")) {
         return valNumFromStr(ast->contents);
     } else if (strstr(ast->tag, "strings")) {
-        return valStr(ast->contents);
+        return valStr(ast->children[1]->contents);
     } else if (strstr(ast->tag, "identifier")) {
         return valSym(ast->contents);
     } else if (strstr(ast->tag, "lambda")) {
@@ -151,25 +162,21 @@ val_t * valRead(mpc_ast_t * ast) {
 
 void valPrint(val_t * v) {
     switch (v->type) {
-        case TYPE_ERR: printf("<ERR \"%s\">", v->s); break;
+        case TYPE_ERR: printf("<ERR %s>", v->s); break;
+        case TYPE_STR: printf("\"%s\"", v->s); break;
         case TYPE_NUM: printf("%ld", v->num); break;
         case TYPE_SYM: printf("%s", v->s); break;
-        case TYPE_STR: printf("%s", v->s); break;
-        case TYPE_LMD: 
-                        printf("(\\%s.", v->s);
-                        valPrint(v->body);
-                        printf(")");
-                        break;
-        case TYPE_APL:
-                        printf("{");
-                        valPrint(v->left);
-                        printf(" ");
-                        valPrint(v->right);
-                        printf("}");
-                        break;
-        default:
-                       printf("UnkownType!");
-
+        case TYPE_LMD: printf("(\\%s.", v->s);
+                       valPrint(v->body);
+                       printf(")");
+                       break;
+        case TYPE_APL: printf("{");
+                       valPrint(v->left);
+                       printf(" ");
+                       valPrint(v->right);
+                       printf("}");
+                       break;
+        default:       printf("UnkownType!");
     }
 }
 
@@ -177,11 +184,21 @@ env_t * envNew(void) {
     return calloc(1, sizeof(env_t));
 }
 
+/* Should it free syms and vars ? */
+void envDel(env_t * e) {
+    for (size_t i = 0; i < e->count; ++i) {
+        free(e->syms[i]);
+    }
+	free(e->syms);
+	free(e->vars);
+	free(e);
+}
+
 int envInsert(const char * s, val_t * v, env_t * e) {
 	if (envFind(s,e)) return 0;
     e->syms = realloc(e->syms, sizeof(char *)*(e->count+1));
     e->vars = realloc(e->vars, sizeof(val_t*)*(e->count+1));
-    e->syms[e->count] = strdump(s); //Not strdump
+    e->syms[e->count] = strdump(s);
     e->vars[e->count] = v;
     e->count++;
     LOGBEGIN
@@ -204,16 +221,6 @@ void envRemove(const char * s, env_t * e) {
     e->count--;
 }
 
-/* Should it free syms and vars ? */
-void envDel(env_t * e) {
-    for (size_t i = 0; i < e->count; ++i) {
-        free(e->syms[i]);
-    }
-	free(e->syms);
-	free(e->vars);
-	free(e);
-}
-
 int envBind(const char * s, val_t * v, env_t * e) {
     for (size_t i = 0; i < e->count; ++i) {
         if (!strcmp(e->syms[i], s) && e->vars[i] == Unbound) {
@@ -221,6 +228,22 @@ int envBind(const char * s, val_t * v, env_t * e) {
             LOGBEGIN
                 LOG("symbol '%s' is bound to ", s);
                 valPrint(v);
+                envPrint(e);
+            LOGEND
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int envDeBind(const char * s, env_t * e) {
+    for (size_t i = 0; i < e->count; ++i) {
+        if (!strcmp(e->syms[i], s) && e->vars[i] != Unbound) {
+			valGC(e->vars[i]); // Garbage?
+            e->vars[i] = Unbound;
+            LOGBEGIN
+                LOG("symbol '%s' is bound to ", s);
+                valPrint(Unbound);
                 envPrint(e);
             LOGEND
             return 1;
@@ -263,8 +286,9 @@ val_t * apply(val_t * l, val_t * r, env_t * e) {
     case TYPE_ERR:
         return l;
     case TYPE_LMD:
+		envDeBind(l->s, l->innerEnv);
         envBind(l->s, r, l->innerEnv);
-        return eval(l->body, l->innerEnv);
+		return eval(l->body, l->innerEnv);
     case TYPE_APL:
     case TYPE_SYM:
         return apply(eval(l,e), eval(r,e), e);
@@ -323,7 +347,9 @@ void interprete(mpc_ast_t * ast, env_t * e) {
         linkScope(v, e);
 
         val_t * ve = (eval(v, e));
+
         LOGBEGIN printf("Eval finish"); LOGEND
+
         valPrint(ve);
         printf("\n");
     }
@@ -347,7 +373,7 @@ int main(int argc, char ** argv) {
     mpca_lang(MPCA_LANG_DEFAULT, 
             "                                                          \
               number : /-?[0-9]+/ ;                                    \
-              strings : /\"(\\\\.|[^\"])*\"/ ;                         \
+              strings : '\"' /(\\\\.|[^\"])*/ '\"';                    \
               definition : \"def\" <identifier> '=' <expr> ;           \
               identifier : /[a-zA-Z_][a-zA-Z0-9_-!@#$^&*<>=|~]*/ ;     \
               lambda : '(' '\\\\' <identifier> '.' <expr> ')' ;        \
@@ -387,6 +413,7 @@ int main(int argc, char ** argv) {
 
         free(input);
     }
+
 #pragma clang diagnostic pop
 
     valDel(GlobalEnvEntry);
