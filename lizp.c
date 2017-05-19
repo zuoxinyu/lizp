@@ -7,11 +7,11 @@
 
 #define ZDEBUG 1
 #define LOGBEGIN \
-	if(zdebug&&ZDEBUG){ \
-		printf("LOG:%-10s:%4d> ", __func__, __LINE__);
+    if(zdebug&&ZDEBUG){ \
+        printf("LOG:%-10s:%4d> ", __func__, __LINE__);
 #define LOGEND \
-		printf("\n"); \
-	}
+        printf("\n"); \
+    }
 
 /* Singleton */
 static val_t * Unbound;
@@ -73,11 +73,11 @@ void valGC(val_t * v) {
     case TYPE_LMD:
     case TYPE_APL:
     case TYPE_NUM:
-		valDel(v);
-		break;
-	case TYPE_SYM:
+        valDel(v);
+        break;
+    case TYPE_SYM:
     default:
-		return;
+        return;
     }
 }
 
@@ -122,6 +122,13 @@ val_t * valLambda(const char * s, val_t * b) {
     /* If in a lambda inner env a pointer points to Unbound,
        it means that the pointer has not been bound */
     envInsert(s, Unbound, v->innerEnv); 
+    return v;
+}
+
+val_t * valClosure(val_t * lambda, env_t * env) {
+    val_t * v = valNew(TYPE_CLS);
+    v->left = lambda;
+    v->innerEnv = env;
     return v;
 }
 
@@ -189,13 +196,13 @@ void envDel(env_t * e) {
     for (size_t i = 0; i < e->count; ++i) {
         free(e->syms[i]);
     }
-	free(e->syms);
-	free(e->vars);
-	free(e);
+    free(e->syms);
+    free(e->vars);
+    free(e);
 }
 
 int envInsert(const char * s, val_t * v, env_t * e) {
-	if (envFind(s,e)) return 0;
+    if (envFind(s,e)) return 0;
     e->syms = realloc(e->syms, sizeof(char *)*(e->count+1));
     e->vars = realloc(e->vars, sizeof(val_t*)*(e->count+1));
     e->syms[e->count] = strdump(s);
@@ -204,7 +211,7 @@ int envInsert(const char * s, val_t * v, env_t * e) {
     LOGBEGIN
         envPrint(e);
     LOGEND
-	return 1;
+    return 1;
 }
 
 void envRemove(const char * s, env_t * e) {
@@ -213,7 +220,7 @@ void envRemove(const char * s, env_t * e) {
         if (!strcmp(e->syms[i], s)) { break; }
     }
 
-	free(e->syms[i]);
+    free(e->syms[i]);
     valDel(e->vars[i]);
     memmove(&e->vars[i], &e->vars[i+1], (e->count-i-1)*sizeof(char *));
     memmove(&e->syms[i], &e->syms[i+1], (e->count-i-1)*sizeof(val_t*));
@@ -228,7 +235,7 @@ int envBind(const char * s, val_t * v, env_t * e) {
             LOGBEGIN
                 LOG("symbol '%s' is bound to ", s);
                 valPrint(v);
-				printf(" ");
+                printf(" ");
                 envPrint(e);
             LOGEND
             return 1;
@@ -285,15 +292,15 @@ val_t * apply(val_t * l, val_t * r, env_t * e) {
     switch (l->type) {
     case TYPE_ERR:
         return l;
-    case TYPE_LMD:
-		envDeBind(l->s, l->innerEnv);
-        envBind(l->s, r, l->innerEnv);
-		return eval(l->body, l->innerEnv);
+    case TYPE_CLS:
+        envInsert(l->left->s, r, l->innerEnv);
+        return eval(l->left->body,l->innerEnv);
     case TYPE_APL:
     case TYPE_SYM:
         return apply(eval(l,e), r, e);
     case TYPE_NUM:
     case TYPE_STR:
+    case TYPE_LMD:
     default:
         return valErr("Not a lambda!");
     }
@@ -304,9 +311,10 @@ val_t * eval(val_t * v, env_t * e) {
     case TYPE_ERR:
     case TYPE_STR:
     case TYPE_NUM:
+    case TYPE_CLS:
         return v;
     case TYPE_LMD: //Maybe return a closure?
-        return v;
+        return valClosure(v,e);
     case TYPE_SYM:
         return envFind(v->s,e)?:valErr("Symbol '%s' is not bound!", v->s);
     case TYPE_APL:
@@ -321,26 +329,26 @@ void linkScope(val_t * l, env_t * e) {
     if (l->type == TYPE_LMD) {
         l->innerEnv->parent = e; 
         linkScope(l->body, l->innerEnv);
-		LOGBEGIN
-			envPrint(l->innerEnv);
-			envPrint(e);
-		LOGEND
+        LOGBEGIN
+            envPrint(l->innerEnv);
+            envPrint(e);
+        LOGEND
         return;
     } else if (l->type == TYPE_APL) {
         linkScope(l->left, e);
         linkScope(l->right, e);
         return;
-	} else if (l->type == TYPE_SYM) {
-		linkScope(envFind(l->s,e), e);
-		return;
-	}
+    } else if (l->type == TYPE_SYM) {
+        linkScope(envFind(l->s,e), e);
+        return;
+    }
 }
 
 void def(mpc_ast_t * ast, env_t * e) {
     /* def <smb> = <expr> */
-	char * s = ast->children[1]->contents;
+    char * s = ast->children[1]->contents;
     int r = envInsert(s, eval(valRead(ast->children[3]),e), e);
-	if (!r) printf("Error: '%s' has already been bound\n", s);
+    if (!r) printf("Error: '%s' has already been bound\n", s);
 }
 
 void interprete(mpc_ast_t * ast, env_t * e) {
@@ -381,7 +389,7 @@ int main(int argc, char ** argv) {
             "                                                          \
               number : /-?[0-9]+/ ;                                    \
               strings : '\"' /(\\\\.|[^\"])*/ '\"';                    \
-              definition : \"def\" <identifier> '=' <expr> ;           \
+              definition : \"let\" <identifier> '=' <expr> \" in <expr>\" ;  \
               identifier : /[a-zA-Z_][a-zA-Z0-9_-!@#$^&*<>=|~]*/ ;     \
               lambda : '(' '\\\\' <identifier> '.' <expr> ')' ;        \
               application : '{' <expr> <expr> '}' ;                    \

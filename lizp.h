@@ -111,7 +111,7 @@ typedef struct env_t env_t;
 
 /* Lizp val_tue type */
 
-enum { TYPE_STR, TYPE_ERR, TYPE_NUM, TYPE_SYM, TYPE_LMD, TYPE_APL };
+enum { TYPE_STR, TYPE_ERR, TYPE_NUM, TYPE_SYM, TYPE_LMD, TYPE_APL, TYPE_CLS };
 
 struct val_t {
 	/* Basic infomation */

@@ -7,19 +7,19 @@ Lizp is a functional language which based on lambda calculus.
 - Currying
 - High level functions
 - Call by value
-- Weak type deference
+- Dynamic typed
 
 
 ## Grammar
 ```
-<expr> ::= <var> | (\<var>.<expr>) | (<expr> <expr>)
-<def>  ::= def <var> = <expr>
-<var>  ::= <num> | <str> | <idf>
+<expr> ::= <var> | <list> | \<sym>.<expr> | (<expr> <expr>) | <let-expr>
+<let-expr>  ::= let <var> = <expr> in <expr>
+<var>  ::= <num> | <str> | <sym>
+<list> ::= /[<expr>(,<expr>)*]/
 <num>  ::= /-?[0-9]+/
 <str>  ::= /"[^\"\0]*"/
-<idf>  ::= /[^0-9][a-zA-Z0-9_-'~!@#$%^&*]+/
+<sym>  ::= /[^0-9][a-zA-Z0-9_-'~!@#$%^&*]+/
 ```
-
 
 ## Code Sample
 
@@ -36,71 +36,70 @@ Lizp is a functional language which based on lambda calculus.
   
 - Currying
 ```
-  (\x.(\y.x+y)) z 
-    -> (\y.z+y) 
+  (\x.\y.(+ x y) z)
+    -> \y.(+ z y) 
 ```
     
 - Function Definition
 ```
-  def add1 = (\x.x+1)
+  let add1 = \x.(+ x 1) in (add1 2)
+    -> 3
 ```
   
 - Function Application
 ```
   (add1 2) 
-    -> (\x.x+1) 2 
+    -> (\x.(+ x 1) 2)
       -> 2+1 
         -> 3
 ```
         
 - High level function definition
+
   - To apply  a lambda
 ```
-    def apply = (\f.(\x.f x))
+    let apply = \f.\x.(f x) in ...
 ```
     
   - To reduce a lambda
 ```
-    def addn = (\x.(\y.x+y))
+    let addn = \x.\y.(+ x y) in ...
 ```
     
 - High level function application
+
   - Apply  a lambda
 ```
     apply add1 2 
-      -> (\f.(\x.f x)) add1 2 
-        -> (\x.add1 x) 2 
-          -> (\x.(\y.y+1) x) 2 
-            -> (\y.y+1) 2 
-              -> 2+1 
+      -> ((\f.\x.(f x) add1) 2) 
+        -> (\x.(add1 x) 2)
+          -> (\x.\y.((+ y 1) x) 2)
+            -> (\y.(+ y 1) 2) 
+              -> (+ 2 1) 
                 -> 3
 ```
                 
   - Reduce a lambda
 ```
     addn 2 
-      -> (\y.(\x.x+y)) 2 
-        -> (\x.x+2)
+      -> (\y.\x.(+ x y) 2) 
+        -> \x.(+ x 2)
 ```
         
 - Variable Definition
 ```
-  def var = 1
+  let var = 1 in ...
 ```
   
   
 ## Future Features
 
-- Function Combinator 
-```
-  def add = apply addn 
-```
-  
 - Recursion Trick
 ```
-  def fact = (\x.x!=0 or 1?x*(self x-1):1) 
-  ; <?:> is a builtin
-  ; <self> is a keyword
+  let fact = \n.(if (== n 0)
+                    1
+                    (self n))
+  in ...
 ```
 
 > Actually, We can define everything as lambda(s). 
@@ -114,8 +113,8 @@ Lizp is a functional language which based on lambda calculus.
 |[+,-,\*,/]  | algebra operators            |
 |[&,\|,~]    | bitwise operators            |
 |[&&,\|\|,!] | logic operators              |
-|[>,<,==,!=] | compare operators            |
-|cond        | symantic for goto            |
+|[>,<,==,/=] | compare operators            |
+|if          | symantic for branch          |
 |self        | symantic for recursion       |
 |cons        | symantic for list constuctor |
 
